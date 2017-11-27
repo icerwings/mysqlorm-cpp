@@ -46,31 +46,7 @@ public:
     }
     string Value(const string & ext = "") {
         return name + "=values(" + name +")" + ext;
-    };
-    template<typename Y>
-    auto operator ==(Y && value) {
-        return Operator(" = ", "?", value);
-    }
-    template<typename Y>
-    auto operator !=(Y && value) {
-        return Operator(" <> ", "?", value);
-    }
-    template<typename Y>
-    auto operator >(Y && value) {
-        return Operator(" > ", "?", value);
-    }
-    template<typename Y>
-    auto operator >=(Y && value) {
-        return Operator(" >= ", "?", value);
-    }
-    template<typename Y>
-    auto operator <(Y && value) {
-        return Operator(" < ", "?", value);
-    }
-    template<typename Y>
-    auto operator <=(Y && value) {
-        return Operator(" <= ", "?", value);
-    }
+    };    
     
     T           val;
     string      name;
@@ -78,22 +54,47 @@ public:
 private:    
     template<typename Y>
     inline typename enable_if<is_pointer<Y>::value, tuple<string, const char*>>::type
-    Operator(const string & op, const string & r, Y value) const {
-        return make_tuple(name + op + r, value);
+    Operator(Y value, const string & ext = "") const {
+        return make_tuple(name + ext, value);
     }    
     template<typename Y>
     inline typename enable_if<is_arithmetic<Y>::value, tuple<string, const Y*>>::type
-    Operator(const string & op, const string & r, Y & value) const {
-        return make_tuple(name + op + r, &value);
+    Operator(Y & value, const string & ext = "") const {
+        return make_tuple(name + ext, &value);
     }
-    inline tuple<string, const char*> Operator(const string & op, const string & r, string & value) const {
-        return make_tuple(name + op + r, value.c_str());
+    inline tuple<string, const char*> Operator(string & value, const string & ext = "") const {
+        return make_tuple(name + ext, value.c_str());
     }
     template<typename Y>
     inline typename enable_if<is_arithmetic<Y>::value, string>::type UptKey(const string & op, const Y & value) {
         ostringstream   os;
         os << name << "=" << name << op << value;
         return os.str();
+    }
+public:
+    template<typename Y>
+    auto operator ==(Y && value) -> decltype(this->Operator(value)) {
+        return Operator(value, " = ?");
+    }
+    template<typename Y>
+    auto operator !=(Y && value) -> decltype(this->Operator(value)) {
+        return Operator(value, " <> ?");
+    }
+    template<typename Y>
+    auto operator >(Y && value) -> decltype(this->Operator(value)) {
+        return Operator(value, " > ?");
+    }
+    template<typename Y>
+    auto operator >=(Y && value) -> decltype(this->Operator(value)) {
+        return Operator(value, " >= ?");
+    }
+    template<typename Y>
+    auto operator <(Y && value) -> decltype(this->Operator(value)) {
+        return Operator(value, " < ?");
+    }
+    template<typename Y>
+    auto operator <=(Y && value) -> decltype(this->Operator(value)) {
+        return Operator(value, " <= ?");
     }
 };
 };
