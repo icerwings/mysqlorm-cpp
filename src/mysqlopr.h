@@ -117,28 +117,15 @@ public:
         }
         return 0;
     }
-    template<typename T, int L = 0>
-    static inline typename enable_if<is_pointer<T>::value>::type Bind(MYSQL_BIND & bind, T value) {
-        bind.buffer_type = MyType(value);
-        bind.buffer = (void *)value;
-        bind.buffer_length = MyLength(value);
+    template<typename T>
+    static inline void Bind(vector<MYSQL_BIND> & params, unsigned long size, T *buffer) {
+        MYSQL_BIND      param;
+        memset(&param, 0, sizeof(param));
+        param.buffer_type = MyType(buffer);
+        param.buffer_length = size; 
+        params.emplace_back(param);
     }
-    template<typename T, int L = 0>
-    static inline typename enable_if<is_arithmetic<T>::value>::type Bind(MYSQL_BIND & bind, T & value) {
-        bind.buffer_type = MyType(&value);
-        bind.buffer = (void *)&value;
-        bind.buffer_length = sizeof(value);
-    }
-    template<typename T, int L = 0>
-    static inline typename enable_if<is_same<T, string>::value>::type Bind(MYSQL_BIND & bind, T & value) {
-        bind.buffer_type = MYSQL_TYPE_STRING;
-        value.clear();
-        value.resize(L);
-        bind.buffer = (void *)value.c_str();
-        bind.buffer_length = L;
-    }    
 };
 };
 
 #endif
-
