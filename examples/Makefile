@@ -1,6 +1,6 @@
 
 
-PRG = orm_test
+PRG = benchmark orm_test
 
 CC = g++
 CXXFLAG = -g -fPIC -Wall -Wno-reorder -std=c++11 -lpthread
@@ -12,7 +12,10 @@ LIB=-L/usr/local/mysql/lib -lmysqlclient
 
 all : $(PRG)
 
-$(PRG) : $(OBJ)
+orm_test : test_orm.o
+	$(CC) $(CXXFLAG) -o $@ $^ $(LIB) $(INC)
+
+benchmark : benchmark.o
 	$(CC) $(CXXFLAG) -o $@ $^ $(LIB) $(INC)
 
 %.o : %.cpp
