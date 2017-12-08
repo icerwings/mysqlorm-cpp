@@ -31,6 +31,8 @@
 #define _DISTINCT(x) x.name = "distinct "#x
 #define _SUM(x, y) x.name = "sum(" #y ")"
 #define _COUNT(x) x.name = "count(1)"
+#define _MAX(x, y) x.name = "max(" #y ")"
+#define _MIN(x, y) x.name = "min(" #y ")"
 #define _FIELD(x) x.name = #x
 #define _DEFINE(T, args...) \
     T() {\
@@ -52,14 +54,15 @@
 namespace MySqlOrm {
 class Session {
 public:
-    Session() {}
+    Session() : m_copyed(false), m_insertId(0), m_errno(0), m_engine(nullptr) {}
     ~Session() {}
 
     void Clear() {
         m_params.clear();
+        m_values.clear();
         m_sql.str("");
     }
-    string String() {
+    string String() const {
         return m_sql.str();
     }
     void Bind(Engine * engine) {
@@ -78,13 +81,13 @@ public:
         });
         return ret;
     }
-    uint64_t InsertId() {
+    uint64_t InsertId() const {
         return m_insertId;
     }
-    unsigned int Errno() {
+    unsigned int Errno() const {
         return m_errno;
     }
-    const char * Errstr() {
+    const char * Errstr() const {
         return m_errstr.c_str();
     }
     Session & Table(const string & table) {
@@ -155,16 +158,17 @@ public:
         _Insert(args...);
         return *this;
     }
-    template<typename... Args>
+    template<bool Copy = false, typename... Args>
     Session & Values(Args &&... args) {
         m_sql << " values(";
-        _Values(args...);
+        m_copyed = Copy;
+        _Values(m_copyed, args...);
         return *this;
     }
     template<typename... Args>
     Session & operator ()(Args &&... args) {
         m_sql << ",(";
-        _Values(args...);
+        _Values(m_copyed, args...);
         return *this;
     }
     template<typename... Args>
@@ -194,15 +198,15 @@ public:
     }
     template<typename T, int L>
     static void Construct(MYSQL_BIND *bind, uint32_t & location, Column<T, L> & field) {
-        MySqlOpr::Bind<T, L>(bind[location++], field.val);
+        _Construct(bind[location++], field);
     }
     template<typename T, int L, typename... Args>
     static void Construct(MYSQL_BIND * bind, uint32_t & location, Column<T, L> & field, Args&&... args) {
-        MySqlOpr::Bind<T, L>(bind[location++], field.val);
+        _Construct(bind[location++], field);
         Construct(bind, location, args...);
     }
     
-    void Print() {
+    void Print() const {
         cout << "SQL: " << m_sql.str() << endl;
         cout << "VALUE: (";
         bool   first = true;
@@ -262,15 +266,24 @@ private:
         _Insert(args...);
     }
     template<typename T>
-    inline void _Values(T && value) {
+    inline void _Values(bool copy, T && value) {
         m_sql << "?)";
-        Append(m_params, value);
+        if (!copy) {
+            Append(m_params, value);
+        } else {
+            Store(value);
+            _Store();
+        }        
     }
     template<typename T, typename... Args>
-    inline void _Values(T && value, Args &&... args) {
+    inline void _Values(bool copy, T && value, Args &&... args) {
         m_sql << "?,";
-        Append(m_params, value);
-        _Values(args...);
+        if (!copy) {
+            Append(m_params, value);
+        } else {
+            Store(value);
+        }
+        _Values(copy, args...);
     }
     template<typename T, int L>
     inline void _Update(Column<T, L>& field) {
@@ -292,15 +305,13 @@ private:
         _OnDupKey(args...);
     }
     template<typename T>
-    Session & _Text(T && value) {
+    inline void _Text(T && value) {
         Append(m_params, value);
-        return *this;
     }
     template<typename T, typename... Args>
-    Session & _Text(T && value, Args&&... args) {
+    inline void _Text(T && value, Args&&... args) {
         Append(m_params, value);
         _Text(args...);
-        return *this;
     }
     
     inline int DoSql(function<int(MYSQL_STMT*)> sqlcmd) {
@@ -322,38 +333,50 @@ private:
         if (MySqlOpr::PrepareSql(hdl.stmt, m_sql.str(), m_params) != 0) {
             return -1;
         }
-        if (sqlcmd && sqlcmd(hdl.stmt) < 0) {
+        int ret = 0;
+        if (sqlcmd && (ret = sqlcmd(hdl.stmt)) < 0) {
             return -1;
         }
         guardErr.Dismiss();
-        return 0;
+        return ret;
     }
     template<typename T>
-    static inline typename enable_if<is_pointer<T>::value>::type Append(vector<MYSQL_BIND>& params, T value) {
-        MYSQL_BIND      param;
-        memset(&param, 0, sizeof(param));
-        MySqlOpr::Bind(param, value);
-        params.emplace_back(param);
+    static inline typename enable_if<is_pointer<T>::value>::type Append(vector<MYSQL_BIND>& params, T value) {        
+        MySqlOpr::Bind(params, strlen(value), value);
     }
     template<typename T>
     static inline typename enable_if<is_arithmetic<T>::value>::type Append(vector<MYSQL_BIND>& params, T & value) {
-        MYSQL_BIND      param;
-        memset(&param, 0, sizeof(param));
-        MySqlOpr::Bind(param, value);
-        params.emplace_back(param);
+        MySqlOpr::Bind(params, sizeof(value), &value);
     }
     static inline void Append(vector<MYSQL_BIND>& params, string & value) {
-        MYSQL_BIND      param;
-        memset(&param, 0, sizeof(param));
-        param.buffer_type = MYSQL_TYPE_STRING;
-        param.buffer = (void *)value.c_str();
-        param.buffer_length = value.size();
-        params.emplace_back(param);
+        MySqlOpr::Bind(params, value.size(), value.c_str());
     }
     static inline void Append(vector<MYSQL_BIND>& params, const vector<MYSQL_BIND> & param) {
         for (auto v : param) {
              params.emplace_back(v);
         }
+    }
+    template<typename T>
+    inline typename enable_if<is_pointer<T>::value>::type Store(T value) {        
+        string   val((char *)value);
+        m_values.emplace_back(val);
+        MySqlOpr::Bind(m_params, strlen((char *)value), value);
+    }
+    template<typename T>
+    inline typename enable_if<is_arithmetic<T>::value>::type Store(T & value) {
+        string   val((char *)&value, sizeof(value));
+        m_values.emplace_back(val);
+        MySqlOpr::Bind(m_params, sizeof(value), &value);
+    }
+    inline void Store(string & value) {
+        m_values.emplace_back(value);
+        MySqlOpr::Bind(m_params, value.size(), value.c_str());
+    }
+    inline void _Store() {
+        int  location   = 0;
+        for (auto & val : m_values) {
+            m_params[location++].buffer = (void *)val.c_str();
+        }            
     }
     template<typename T>
     static inline void Link(ostringstream & osStr, vector<MYSQL_BIND>& params, 
@@ -367,15 +390,31 @@ private:
         osStr << get<0>(expr) << op;
         Append(params, get<1>(expr));
         return Link(osStr, params, op, args...);
-    }    
+    }
+    template<typename T, int L>
+    static inline typename enable_if<is_arithmetic<T>::value>::type _Construct(MYSQL_BIND & param, Column<T, L> & field) {
+        param.buffer_type = MySqlOpr::MyType(&field.val);
+        param.buffer = (void *)&field.val;
+        param.buffer_length = L;
+    }
+    template<typename T, int L>
+    static inline typename enable_if<is_same<T, string>::value>::type _Construct(MYSQL_BIND & param, Column<T, L> & field) {
+        field.val.clear();
+        field.val.resize(L);
+        param.buffer_type = MYSQL_TYPE_STRING;
+        param.buffer = (void *)field.val.c_str();
+        param.buffer_length = L;
+    }
     
     string              m_table;
     ostringstream       m_sql;
     vector<MYSQL_BIND>  m_params;
+    vector<string>      m_values;
     Engine              *m_engine;
     uint64_t            m_insertId;
     unsigned int        m_errno;
     string              m_errstr;
+    bool                m_copyed;
 };
 };
 
