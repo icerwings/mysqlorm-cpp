@@ -26,7 +26,7 @@
 using namespace std;
 
 namespace MySqlOrm {
-template<typename T, int LENGTH = 0>
+template<typename T, int LENGTH = sizeof(T)>
 class Column {
 public:
     Column() {}
@@ -39,12 +39,12 @@ public:
         return *this;
     }
     string operator +(const T & value) {
-        return UptKey("+", value);
+        return OperKey("+", value);
     }
     string operator -(const T & value) {
-        return UptKey("-", value);
+        return OperKey("-", value);
     }
-    string Value(const string & ext = "") {
+    string Value(const string & ext = "") const {
         return name + "=values(" + name +")" + ext;
     };    
     
@@ -66,7 +66,7 @@ private:
         return make_tuple(name + ext, value.c_str());
     }
     template<typename Y>
-    inline typename enable_if<is_arithmetic<Y>::value, string>::type UptKey(const string & op, const Y & value) {
+    inline typename enable_if<is_arithmetic<Y>::value, string>::type OperKey(const string & op, const Y & value) const {
         ostringstream   os;
         os << name << "=" << name << op << value;
         return os.str();
